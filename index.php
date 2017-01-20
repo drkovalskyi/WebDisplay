@@ -33,11 +33,11 @@ class DirectoryListing {
 	public $pageTitle = null;
 
 	// The URL of this script. Optionally set if your server is unable to detect the paths of files
-	public $includeUrl = 'http://t3serv001.mit.edu/~snarayan/index.php';
+	public $includeUrl = 'XXXX/index.php';
 
 	// If you've enabled the includeUrl parameter above, enter the full url to the directory the index.php file
 	// is located in here, followed by a forward slash.
-	public $directoryUrl = 'http://t3serv001.mit.edu/~snarayan/';
+	public $directoryUrl = 'XXXX/~snarayan/';
 
 	// Set to true to list all sub-directories and allow them to be browsed
 	public $showSubDirectories = true;
@@ -204,12 +204,16 @@ class DirectoryListing {
 			$this->__sortOrder = $_GET['sort'];
 		}
 
-		if (isset($_GET['dir'])) {
+		if (isset($_GET['dir']) || isset($_POST['download_dirpath'])) {
 			if (isset($_GET['delete']) && $this->enableDirectoryDeletion) {
 				$this->deleteDirectory();
 			}
 
-			$this->__currentDirectory = $_GET['dir'];
+      if (isset($_POST['download_dirpath'])) {
+        $this->__currentDirectory = $_POST['download_dirpath'];
+      } else {
+        $this->__currentDirectory = $_GET['dir'];
+      }
 			return $this->__display();
 		} elseif (isset($_GET['preview'])) {
 			$this->__generatePreview($_GET['preview']);
@@ -980,26 +984,85 @@ function pr($data, $die = false) {
                 if (!empty($_GET["regex"])) {
                   $regex = $_GET["regex"];
                 }
+
+                $download_regex = $regex; 
+                if (!empty($_POST["download_regex"])) {
+                  $download_regex = $_POST["download_regex"];
+                  $base_regex = $_POST["base_regex"];
+                }
+                if (isset($_POST["download_files"]) && $_POST["download_files"] == "Download files") {
+                  $rootPath = realpath($_POST["download_dirpath"]);
+                  $tarPath = sys_get_temp_dir(). DS . $_POST["download_name"] . '.tar';
+                  $gzPath = $tarPath . '.gz';
+                  unlink($tarPath); unlink($gzPath);
+                  $phar = new PharData($tarPath);
+                  foreach ($data['files'] as $file) {
+                    if (preg_match("/" . $download_regex . "/",$file['name'])) 
+                    {
+                      $filePath = realpath($_POST["download_dirpath"] . DS . $file['name']);
+                      $relativePath = $_POST["download_name"] . DS . substr($filePath,strlen($rootPath)+1);
+                      $ret = $phar->addFile($filePath,$relativePath);
+                      $ret = file_exists($filePath);
+                    }
+                  }
+
+                  $phar->compress(Phar::GZ);
+
+                  ob_end_clean();
+                  header("Content-Type: application/x-gzip");
+                  header("Content-Length: " . filesize($gzPath));
+                  header(sprintf('Content-Disposition: attachment; filename="%s"',addslashes(basename($gzPath))));
+                  flush();
+                  readfile($gzPath);
+                  exit(0);
+                }
+                if (isset($_POST["download_files"]) && $_POST["download_files"] == "Download recursively") {
+                  $rootPath = realpath($_POST["download_dirpath"]);
+                  $tarPath = sys_get_temp_dir(). DS . $_POST["download_name"] . '.tar';
+                  $gzPath = $tarPath . '.gz';
+                  unlink($tarPath); unlink($gzPath);
+                  $phar = new PharData($tarPath);
+                  $phar->buildFromDirectory($data['currentPath']);
+
+                  $phar->compress(Phar::GZ);
+
+                  ob_end_clean();
+                  header("Content-Type: application/x-gzip");
+                  header("Content-Length: " . filesize($gzPath));
+                  header(sprintf('Content-Disposition: attachment; filename="%s"',addslashes(basename($gzPath))));
+                  flush();
+                  readfile($gzPath);
+                  exit(0);
+
+                }
       ?>
 
 				<div class="row">
-					<div class="col-lg-12">
-						<ul class="breadcrumb">
-            <form method="get" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
-              <input type="submit" name="submit" value="Filter">  
-              <input type="text" name="regex" value=<?php echo $regex; ?>>
-              <?php
-                foreach($_GET as $name => $value) {
-                  if ($name!=="regex" && $name!=="submit") {
-    //                $name = htmlspecialchars($name);
-                    $value = html_entity_decode($value);
-    //                $value = htmlspecialchars($value);
-                    echo '<input type="hidden" name="'. $name .'" value="'. $value .'">';
-                  }
-              }
-              ?>
-            </form>
-						</ul>
+					<div class="col-xs-12">
+            <div class="breadcrumb">
+                  <form method="get" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
+                    <input type="text" name="regex" value=<?php echo $regex; ?>>
+                    <input type="submit" name="submit" value="Filter files">  
+                    <?php
+                      foreach($_GET as $name => $value) {
+                        if ($name!=="regex" && $name!=="submit") {
+                          $value = html_entity_decode($value);
+                          echo '<input type="hidden" name="'. $name .'" value="'. $value .'">';
+                        }
+                      }
+                    ?>
+                  </form>
+            </div>
+						<div class="breadcrumb">
+                  <form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
+                    <input type="hidden" name="base_regex" value=<?php echo $regex;?>>
+                    <input type="hidden" name="download_dirpath" value=<?php echo $data['currentPath'];?>>
+                    <input type="text" name="download_regex" value=<?php echo $download_regex; ?>>
+                    <input type="submit" name="download_files" value="Download files">  
+                    <input type="submit" name="download_files" value="Download recursively">  
+                    as <input type="text" name="download_name" value=<?php echo end($data['directoryTree']);?>>.tar.gz
+                  </form>
+						</div>
 					</div>
 				</div>
 
@@ -1051,47 +1114,6 @@ function pr($data, $die = false) {
 						</div>
 					</div>
 				</div>
-
-			<?php if ($data['enableUploads']): ?>
-				<div class="row">
-					<div class="col-xs-12">
-						<form action="" method="post" enctype="multipart/form-data" class="text-center upload-form form-vertical">
-							<h4>Upload A File</h4>
-							<div class="row upload-field">
-								<div class="col-xs-12">
-									<div class="form-group">
-										<div class="row">
-											<div class="col-sm-2 col-md-2 col-md-offset-3 text-right">
-												<label for="upload">File:</label>
-											</div>
-											<div class="col-sm-10 col-md-4">
-												<input type="file" name="upload[]" id="upload" class="form-control">
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
-							<hr>
-							<?php if ($listing->enableMultiFileUploads): ?>
-								<div class="row">
-									<div class="col-xs-12 col-sm-6 col-md-4 col-md-offset-2 col-lg-3 col-lg-offset-2">
-										<button type="button" class="btn btn-success btn-block" name="add_file">Add Another File</button>
-									</div>
-									<div class="col-xs-12 col-sm-6 col-md-4 col-md-offset-1 col-lg-3 col-lg-offset-2">
-										<button type="submit" class="btn btn-primary btn-block" name="submit">Upload File(s)</button>
-									</div>
-								</div>
-							<?php else: ?>
-								<div class="row">
-									<div class="col-xs-12 col-sm-6 col-sm-offset-3">
-										<button type="submit" class="btn btn-primary btn-block" name="submit">Upload File</button>
-									</div>
-								</div>
-							<?php endif; ?>
-						</form>
-					</div>
-				</div>
-			<?php endif; ?>
 
       <?php if (! empty($data['files'])): ?>
         <div class="row">

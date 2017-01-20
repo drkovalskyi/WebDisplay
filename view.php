@@ -2,6 +2,12 @@
 session_start();
 class DirectoryListing {
 	/*
+
+
+    TODO:
+    Replace 'filter' with two options: selecting and removing
+    Can use the pattern /^((?!pho).)*$/ to remove pho, e.g.
+
 	====================================================================================================
 	Evoluted Directory Listing Script - Version 4
 	www.evoluted.net / info@evoluted.net
@@ -33,11 +39,11 @@ class DirectoryListing {
 	public $pageTitle = null;
 
 	// The URL of this script. Optionally set if your server is unable to detect the paths of files
-	public $includeUrl = 'http://t3serv001.mit.edu/~snarayan/view.php';
+	public $includeUrl = 'XXXX/view.php';
 
 	// If you've enabled the includeUrl parameter above, enter the full url to the directory the view.php file
 	// is located in here, followed by a forward slash.
-	public $directoryUrl = 'http://t3serv001.mit.edu/~snarayan/';
+	public $directoryUrl = 'XXXX/~snarayan/';
 
 	// Set to true to list all sub-directories and allow them to be browsed
 	public $showSubDirectories = true;
@@ -204,12 +210,17 @@ class DirectoryListing {
 			$this->__sortOrder = $_GET['sort'];
 		}
 
-		if (isset($_GET['dir'])) {
+		if (isset($_GET['dir']) || isset($_POST['download_dirpath'])) {
 			if (isset($_GET['delete']) && $this->enableDirectoryDeletion) {
 				$this->deleteDirectory();
 			}
 
-			$this->__currentDirectory = $_GET['dir'];
+      if (isset($_POST['download_dirpath'])) {
+        $this->__currentDirectory = $_POST['download_dirpath'];
+      } else {
+        $this->__currentDirectory = $_GET['dir'];
+      }
+
 			return $this->__display();
 		} elseif (isset($_GET['preview'])) {
 			$this->__generatePreview($_GET['preview']);
@@ -957,7 +968,7 @@ function pr($data, $die = false) {
 									echo $name;
 								else:
 								?>
-                  <a href=<?php echo "http://$_SERVER[HTTP_HOST]/~snarayan/index.php?dir=$url"; ?>>
+                  <a href=<?php echo $directoryUrl."index.php?dir=$url"; ?>>
 										<?php echo $name; ?>
 									</a>
 								<?php
@@ -980,28 +991,89 @@ function pr($data, $die = false) {
                 if (!empty($_GET["regex"])) {
                   $regex = $_GET["regex"];
                 }
+
+                //$download_regex = $regex . "((pdf$)|(png$)|(C$))"; 
+                $download_regex = $regex; 
+                if (!empty($_POST["download_regex"])) {
+                  $download_regex = $_POST["download_regex"];
+                  $base_regex = $_POST["base_regex"];
+                }
+                if (isset($_POST["download_files"]) && $_POST["download_files"] == "Download files") {
+                  $rootPath = realpath($_POST["download_dirpath"]);
+                  $tarPath = sys_get_temp_dir(). DS . $_POST["download_name"] . '.tar';
+                  $gzPath = $tarPath . '.gz';
+                  unlink($tarPath); unlink($gzPath);
+                  $phar = new PharData($tarPath);
+                  foreach ($data['files'] as $file) {
+                    if (preg_match("/" . $download_regex . "/",$file['name'])) 
+                    {
+                      $filePath = realpath($_POST["download_dirpath"] . DS . $file['name']);
+                      $relativePath = $_POST["download_name"] . DS . substr($filePath,strlen($rootPath)+1);
+                      $ret = $phar->addFile($filePath,$relativePath);
+                      $ret = file_exists($filePath);
+                    }
+                  }
+
+                  $phar->compress(Phar::GZ);
+
+                  ob_end_clean();
+                  header("Content-Type: application/x-gzip");
+                  header("Content-Length: " . filesize($gzPath));
+                  header(sprintf('Content-Disposition: attachment; filename="%s"',addslashes(basename($gzPath))));
+                  flush();
+                  readfile($gzPath);
+                  exit(0);
+                }
+                if (isset($_POST["download_files"]) && $_POST["download_files"] == "Download recursively") {
+                  $rootPath = realpath($_POST["download_dirpath"]);
+                  $tarPath = sys_get_temp_dir(). DS . $_POST["download_name"] . '.tar';
+                  $gzPath = $tarPath . '.gz';
+                  unlink($tarPath); unlink($gzPath);
+                  $phar = new PharData($tarPath);
+                  $phar->buildFromDirectory($data['currentPath']);
+
+                  $phar->compress(Phar::GZ);
+
+                  ob_end_clean();
+                  header("Content-Type: application/x-gzip");
+                  header("Content-Length: " . filesize($gzPath));
+                  header(sprintf('Content-Disposition: attachment; filename="%s"',addslashes(basename($gzPath))));
+                  flush();
+                  readfile($gzPath);
+                  exit(0);
+
+                }
       ?>
 
 				<div class="row">
-					<div class="col-lg-12">
-						<ul class="breadcrumb">
-            <form method="get" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
-              <input type="submit" name="submit" value="Filter">  
-              <input type="text" name="regex" value=<?php echo $regex; ?>>
-              <?php
-                foreach($_GET as $name => $value) {
-                  if ($name!=="regex" && $name!=="submit") {
-    //                $name = htmlspecialchars($name);
-                    $value = html_entity_decode($value);
-    //                $value = htmlspecialchars($value);
-                    echo '<input type="hidden" name="'. $name .'" value="'. $value .'">';
-                  }
-              }
-              ?>
-            </form>
-						</ul>
+					<div class="col-xs-12">
+            <div class="breadcrumb">
+                  <form method="get" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
+                    <input type="text" name="regex" value=<?php echo $regex; ?>>
+                    <input type="submit" name="submit" value="Filter files">  
+                    <?php
+                      foreach($_GET as $name => $value) {
+                        if ($name!=="regex" && $name!=="submit") {
+                          $value = html_entity_decode($value);
+                          echo '<input type="hidden" name="'. $name .'" value="'. $value .'">';
+                        }
+                      }
+                    ?>
+                  </form>
+            </div>
+						<div class="breadcrumb">
+                  <form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]);?>">  
+                    <input type="hidden" name="base_regex" value=<?php echo $regex;?>>
+                    <input type="hidden" name="download_dirpath" value=<?php echo $data['currentPath'];?>>
+                    <input type="text" name="download_regex" value=<?php echo $download_regex; ?>>
+                    <input type="submit" name="download_files" value="Download files">  
+                    <input type="submit" name="download_files" value="Download recursively">  
+                    as <input type="text" name="download_name" value=<?php echo end($data['directoryTree']);?>>.tar.gz
+                  </form>
+						</div>
 					</div>
 				</div>
+
 
 
       <?php if (! empty($data['files'])): ?>
